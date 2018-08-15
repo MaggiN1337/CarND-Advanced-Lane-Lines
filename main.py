@@ -7,7 +7,8 @@ import glob
 import pickle
 
 CALIBRATION__JPG = "calibration1.jpg"
-
+TRANSFORMATION__JPG = "test4.jpg"
+FOLDER_TEST_INPUT = "test_images/"
 FOLDER_OUTPUT = "output_images/"
 FOLDER_CAMERA_CAL = "camera_cal/"
 INPUT_VIDEO = "project_video.mp4"
@@ -15,6 +16,73 @@ INPUT_VIDEO = "project_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
 
 TEST_RUN = True
+SOBEL_KERNEL = 3
+
+
+# Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
+def get_camera_cali_params():
+    # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
+    objp = np.zeros((6 * 9, 3), np.float32)
+    objp[:, :2] = np.mgrid[0:9, 0:6].T.reshape(-1, 2)
+
+    # Arrays to store object points and image points from all the images.
+    objpoints = []  # 3d points in real world space
+    imgpoints = []  # 2d points in image plane.
+
+    # Make a list of calibration images
+    images = glob.glob(FOLDER_CAMERA_CAL + 'calibration*.jpg')
+
+    # Step through the list and search for chessboard corners
+    for fname in images:
+        nx, ny = 6, 9
+        img = cv2.imread(fname)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Find the chessboard corners
+        ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
+
+        # If found, add object points, image points
+        # if not ret:
+        #     nx, ny = 5, 9
+        #     objp = np.zeros((nx * ny, 3), np.float32)
+        #     objp[:, :2] = np.mgrid[0:nx, 0:ny].T.reshape(-1, 2)
+        #     ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
+        # if not ret:
+        #     nx, ny = 6, 8
+        #     objp = np.zeros((nx * ny, 3), np.float32)
+        #     objp[:, :2] = np.mgrid[0:nx, 0:ny].T.reshape(-1, 2)
+        #     ret, corners = cv2.findChessboardCorners(gray, (nx, ny), None)
+        if ret:
+            objpoints.append(objp)
+            imgpoints.append(corners)
+
+            if TEST_RUN:
+                # Draw and display the corners
+                img_with_corners = cv2.drawChessboardCorners(img, (nx, ny), corners, ret)
+                save_image_as_png(img_with_corners, "1_corners_detected_", fname.split('\\')[-1].split('.')[0])
+        else:
+            print("No corners found in image: " + fname)
+    return objpoints, imgpoints
+
+
+# save image as png to OUTPUT_FOLDER
+def save_image_as_png(img, prefix, filename):
+    cv2.imwrite(FOLDER_OUTPUT + prefix + filename + ".png", img)
+
+
+# get coefficients from camera calibration
+def calibrate_camera(folder, img, obj_p, img_p):
+    filename = img.split('.')[0]
+    img = cv2.imread(folder + img)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(obj_p, img_p, gray.shape[::-1], None, None)
+
+    if TEST_RUN:
+        dst = cv2.undistort(img, mtx, dist, None, mtx)
+        save_image_as_png(dst, "2_undistorted_", filename)
+
+    return mtx, dist
+
 
 def abs_sobel_thresh(image, orient='x', sobel_kernel=3, thresh=(0, 255)):
     # Calculate directional gradient
@@ -25,6 +93,8 @@ def abs_sobel_thresh(image, orient='x', sobel_kernel=3, thresh=(0, 255)):
         sobel = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     elif orient == 'y':
         sobel = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+    else:
+        return -1
     abs_sobel = np.absolute(sobel)
 
     scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
@@ -37,7 +107,7 @@ def abs_sobel_thresh(image, orient='x', sobel_kernel=3, thresh=(0, 255)):
 def mag_thresh(image, sobel_kernel=3, mag_thresh=(0, 255)):
     # Calculate gradient magnitude
     # Apply threshold
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
     abs_sobelxy = np.sqrt(np.power(sobelx, 2) + np.power(sobely, 2))
@@ -51,7 +121,7 @@ def mag_thresh(image, sobel_kernel=3, mag_thresh=(0, 255)):
 def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi / 2)):
     # Calculate gradient direction
     # Apply threshold
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
     abs_sobelx = np.absolute(sobelx)
@@ -61,6 +131,69 @@ def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi / 2)):
     dir_binary[(grad_dir >= thresh[0]) & (grad_dir <= thresh[1])] = 1
 
     return dir_binary
+
+
+# Apply each of the thresholding functions
+def apply_thresholding(image, ksize):
+    gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=ksize, thresh=(0, 255))
+    grady = abs_sobel_thresh(image, orient='y', sobel_kernel=ksize, thresh=(0, 255))
+    mag_binary = mag_thresh(image, sobel_kernel=ksize, mag_thresh=(0, 255))
+    dir_binary = dir_threshold(image, sobel_kernel=ksize, thresh=(0, np.pi / 2))
+
+    combined = np.zeros_like(dir_binary)
+    combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1))] = 1
+
+    return combined
+
+
+#
+def s_channel_and_gradient_threshold(img):
+    # Convert to HLS color space and separate the S channel
+    # Note: img is the undistorted image
+    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
+    s_channel = hls[:, :, 2]
+
+    # Grayscale image
+    # NOTE: we already saw that standard grayscaling lost color information for the lane lines
+    # Explore gradients in other colors spaces / color channels to see what might work better
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Sobel x
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)  # Take the derivative in x
+    abs_sobelx = np.absolute(sobelx)  # Absolute x derivative to accentuate lines away from horizontal
+    scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
+
+    # Threshold x gradient
+    thresh_min = 20
+    thresh_max = 100
+    sxbinary = np.zeros_like(scaled_sobel)
+    sxbinary[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+
+    # Threshold color channel
+    s_thresh_min = 170
+    s_thresh_max = 255
+    s_binary = np.zeros_like(s_channel)
+    s_binary[(s_channel >= s_thresh_min) & (s_channel <= s_thresh_max)] = 1
+
+    # Stack each channel to view their individual contributions in green and blue respectively
+    # This returns a stack of the two binary images, whose components you can see as different colors
+    # color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
+
+    # Combine the two binary thresholds
+    combined_binary = np.zeros_like(sxbinary)
+    combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
+
+    return combined_binary
+
+
+def unwarp(img, src, dst):
+    h, w = img.shape[:2]
+    # use cv2.getPerspectiveTransform() to get M, the transform matrix, and Minv, the inverse
+    M = cv2.getPerspectiveTransform(src, dst)
+    Minv = cv2.getPerspectiveTransform(dst, src)
+    # use cv2.warpPerspective() to warp your image to a top-down view
+    warped = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_LINEAR)
+    return warped, M, Minv
 
 
 # Define a class to receive the characteristics of each line detection
@@ -114,51 +247,8 @@ def project_lines_on_image(warped, left_fitx, right_fitx, ploty, image, Minv, un
     plt.imshow(result)
 
 
-# TODO: Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
-def get_camera_cali_params():
-    # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
-    objp = np.zeros((6 * 9, 3), np.float32)
-    objp[:, :2] = np.mgrid[0:9, 0:6].T.reshape(-1, 2)
-
-    # Arrays to store object points and image points from all the images.
-    objpoints = []  # 3d points in real world space
-    imgpoints = []  # 2d points in image plane.
-
-    # Make a list of calibration images
-    images = glob.glob(FOLDER_CAMERA_CAL + 'calibration*.jpg')
-
-    # Step through the list and search for chessboard corners
-    for fname in images:
-        img = cv2.imread(fname)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        # Find the chessboard corners
-        ret, corners = cv2.findChessboardCorners(gray, (9, 6), None)
-
-        # If found, add object points, image points
-        if ret:
-            objpoints.append(objp)
-            imgpoints.append(corners)
-
-        if TEST_RUN:
-            # Draw and display the corners
-            img2 = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
-            cv2.imwrite(FOLDER_OUTPUT + "corners_detected_" + fname.split('\\')[-1].split('.')[0] +  ".png", img2)
-
-    return objpoints, imgpoints
-
-
-def calibrate_camera(folder, img):
-    filename = img.split('.')[0]
-    img = cv2.imread(folder + img)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(obj_points, img_points, gray.shape[::-1], None, None)
-
-    if TEST_RUN:
-        dst = cv2.undistort(img, mtx, dist, None, mtx)
-        cv2.imwrite(FOLDER_OUTPUT + "undistorted_" + filename + ".png", dst)
-
-    return mtx, dist
+obj_points, img_points = get_camera_cali_params()
+cali_mtx, cali_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG, obj_points, img_points)
 
 # TODO: import video as array of images
 # TODO: Apply a distortion correction to raw images.
@@ -168,10 +258,5 @@ def calibrate_camera(folder, img):
 # TODO: Determine the curvature of the lane and vehicle position with respect to center.
 # TODO: Warp the detected lane boundaries back onto the original image.
 # TODO: Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
-
-
-obj_points, img_points = get_camera_cali_params()
-cali_mtx, cali_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG)
-
 
 print("Finished")
