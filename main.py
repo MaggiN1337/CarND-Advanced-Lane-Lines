@@ -6,12 +6,15 @@ import cv2
 import glob
 import pickle
 
+CALIBRATION__JPG = "calibration1.jpg"
+
 FOLDER_OUTPUT = "output_images/"
 FOLDER_CAMERA_CAL = "camera_cal/"
 INPUT_VIDEO = "project_video.mp4"
 # INPUT_VIDEO = "challenge_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
 
+TEST_RUN = True
 
 def abs_sobel_thresh(image, orient='x', sobel_kernel=3, thresh=(0, 255)):
     # Calculate directional gradient
@@ -78,7 +81,7 @@ class Line():
         # distance in meters of vehicle center from the line
         self.line_base_pos = None
         # difference in fit coefficients between last and new fits
-        self.diffs = np.array([0,0,0], dtype='float')
+        self.diffs = np.array([0, 0, 0], dtype='float')
         # x values for detected line pixels
         self.allx = None
         # y values for detected line pixels
@@ -111,9 +114,64 @@ def project_lines_on_image(warped, left_fitx, right_fitx, ploty, image, Minv, un
     plt.imshow(result)
 
 
-# TODO: camera calibration
+# TODO: Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
+def get_camera_cali_params():
+    # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
+    objp = np.zeros((6 * 9, 3), np.float32)
+    objp[:, :2] = np.mgrid[0:9, 0:6].T.reshape(-1, 2)
 
+    # Arrays to store object points and image points from all the images.
+    objpoints = []  # 3d points in real world space
+    imgpoints = []  # 2d points in image plane.
+
+    # Make a list of calibration images
+    images = glob.glob(FOLDER_CAMERA_CAL + 'calibration*.jpg')
+
+    # Step through the list and search for chessboard corners
+    for fname in images:
+        img = cv2.imread(fname)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Find the chessboard corners
+        ret, corners = cv2.findChessboardCorners(gray, (9, 6), None)
+
+        # If found, add object points, image points
+        if ret:
+            objpoints.append(objp)
+            imgpoints.append(corners)
+
+        if TEST_RUN:
+            # Draw and display the corners
+            img2 = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
+            cv2.imwrite(FOLDER_OUTPUT + "corners_detected_" + fname.split('\\')[-1].split('.')[0] +  ".png", img2)
+
+    return objpoints, imgpoints
+
+
+def calibrate_camera(folder, img):
+    filename = img.split('.')[0]
+    img = cv2.imread(folder + img)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(obj_points, img_points, gray.shape[::-1], None, None)
+
+    if TEST_RUN:
+        dst = cv2.undistort(img, mtx, dist, None, mtx)
+        cv2.imwrite(FOLDER_OUTPUT + "undistorted_" + filename + ".png", dst)
+
+    return mtx, dist
 
 # TODO: import video as array of images
+# TODO: Apply a distortion correction to raw images.
+# TODO: Use color transforms, gradients, etc., to create a thresholded binary image.
+# TODO: Apply a perspective transform to rectify binary image ("birds-eye view").
+# TODO: Detect lane pixels and fit to find the lane boundary.
+# TODO: Determine the curvature of the lane and vehicle position with respect to center.
+# TODO: Warp the detected lane boundaries back onto the original image.
+# TODO: Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
 
 
+obj_points, img_points = get_camera_cali_params()
+cali_mtx, cali_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG)
+
+
+print("Finished")
