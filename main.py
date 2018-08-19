@@ -19,18 +19,25 @@ OUTPUT_VIDEO = "lane_detected_video.mp4"
 
 # debug controls
 TEST_RUN = True
-VIDEO_LENGTH_SECONDS = 1
+VIDEO_LENGTH_SUB = (20, 26)
+VISUALIZATION = False
 
 # HYPERPARAMETERS
-SOBEL_KERNEL = 7
+SOBEL_KERNEL = 13
+# Threshold x gradient
+X_THRES_MIN = 20
+X_THRES_MAX = 90
+# Threshold color channel
+S_CH_THRES_MIN = 170
+S_CH_THRES_MAX = 255
 # Choose the number of sliding windows
 N_WINDOWS = 10
 # Set the width of the windows +/- margin
-WINDOW_MARGIN = 20
+WINDOW_MARGIN = 70
 # Set minimum number of pixels found to recenter window
 WINDOW_RECENTER_MIN_PIX = 40
 # Choose the width of the margin around the previous polynomial to search
-NEW_LANE_MARGIN = 80
+NEW_LANE_MARGIN = 70
 # minimum distance of lane from image borders
 MIN_LANE_OFFSET = 150
 
@@ -137,22 +144,16 @@ def s_channel_and_gradient_threshold(img):
     abs_sobelx = np.absolute(sobelx)  # Absolute x derivative to accentuate lines away from horizontal
     scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
 
-    # Threshold x gradient
-    thresh_min = 20
-    thresh_max = 90
     sxbinary = np.zeros_like(scaled_sobel)
-    sxbinary[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+    sxbinary[(scaled_sobel >= X_THRES_MIN) & (scaled_sobel <= X_THRES_MAX)] = 1
 
-    # Threshold color channel
-    s_thresh_min = 180
-    s_thresh_max = 255
     s_binary = np.zeros_like(s_channel)
-    s_binary[(s_channel >= s_thresh_min) & (s_channel <= s_thresh_max)] = 1
+    s_binary[(s_channel >= S_CH_THRES_MIN) & (s_channel <= S_CH_THRES_MAX)] = 1
 
     # Stack each channel to view their individual contributions in green and blue respectively
     # This returns a stack of the two binary images, whose components you can see as different colors
-    # color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
-
+    color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
+    save_image_as_png(color_binary, "66", "color_binary")
     # Combine the two binary thresholds
     combined_binary = np.zeros_like(sxbinary)
     combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
@@ -200,9 +201,12 @@ def unwarp(img, src, dst):
 
 
 def preprocess_pipeline(img):
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     undist_image = cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx)
+    save_image_as_png(undist_image, "5_", "undistorted")
 
     c_binary = s_channel_and_gradient_threshold(undist_image)
+    save_image_as_png(c_binary, "6_", "c_binary")
 
     imshape = c_binary.shape
     vertices = np.array([[
@@ -213,8 +217,10 @@ def preprocess_pipeline(img):
         dtype=np.int32)
 
     image_region_of_interest = region_of_interest(c_binary, vertices)
+    save_image_as_png(image_region_of_interest, "7_", "image_region_of_interest")
 
     warped_bin, M, Minv = unwarp(image_region_of_interest, src, dst)
+    save_image_as_png(warped_bin, "8_", "warped_bin")
 
     # return warped_binary, M, Minv
     return warped_bin, Minv
@@ -227,9 +233,9 @@ def histogram(img):
 
     # Sum across image pixels vertically - make sure to set an `axis`
     # i.e. the highest areas of vertical lines should be larger values
-    histogram = np.sum(bottom_half, axis=0)
+    histo = np.sum(bottom_half, axis=0)
 
-    return histogram
+    return histo
 
 
 def find_lane_pixels(binary_warped):
@@ -244,6 +250,14 @@ def find_lane_pixels(binary_warped):
     midpoint = np.int(hist.shape[0] // 2)
     leftx_base = np.argmax(hist[:midpoint])
     rightx_base = np.argmax(hist[midpoint:]) + midpoint
+    # Current positions to be updated later for each window in nwindows
+    if leftx_base < MIN_LANE_OFFSET:
+        leftx_base = MIN_LANE_OFFSET
+
+    if rightx_base > binary_warped.shape[1] - MIN_LANE_OFFSET:
+        rightx_base = binary_warped.shape[1] - MIN_LANE_OFFSET
+    leftx_current = leftx_base
+    rightx_current = rightx_base
 
     # Set height of windows - based on nwindows above and image shape
     window_height = np.int(binary_warped.shape[0] // N_WINDOWS)
@@ -251,9 +265,6 @@ def find_lane_pixels(binary_warped):
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
-    # Current positions to be updated later for each window in nwindows
-    leftx_current = leftx_base
-    rightx_current = rightx_base
 
     # Create empty lists to receive left and right lane pixel indices
     left_lane_inds = []
@@ -392,8 +403,10 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
     height = dst[1][0] - dst[0][0]
 
     # TODO: Check ft vs. meters
-    ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
-    xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
+    #ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
+    #xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
+    ym_per_pix = 30/720 # meters per pixel in y dimension
+    xm_per_pix = 3.7/700 # meters per pixel in x dimension
     #ym_per_pix = 12.0 / height  # meters per pixel in y dimension
     #xm_per_pix = 10.0 / width  # meters per pixel in x dimension
 
@@ -440,7 +453,9 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
 def draw_lane(original_img, binary_img, l_fit, r_fit, Minv):
     new_img = np.copy(original_img)
 
-    if l_fit is None or len(l_fit) != 3 or r_fit is None or len(r_fit) != 3:
+    # TODO: FIND BUG HERE
+    if l_fit is None or r_fit is None:
+    #if l_fit is None or len(l_fit) != 3 or r_fit is None or len(r_fit) != 3:
         return original_img
 
     # Create an image to draw the lines on
@@ -583,7 +598,7 @@ def write_video():
 
     # To speed up the testing process you may want to try your pipeline on a shorter subclip of the video
     if TEST_RUN:
-        input_clip = VideoFileClip(FOLDER_VIDEOS_INPUT + INPUT_VIDEO).subclip(0, VIDEO_LENGTH_SECONDS)
+        input_clip = VideoFileClip(FOLDER_VIDEOS_INPUT + INPUT_VIDEO).subclip(VIDEO_LENGTH_SUB[0], VIDEO_LENGTH_SUB[1])
     else:
         input_clip = VideoFileClip(FOLDER_VIDEOS_INPUT + INPUT_VIDEO)
 
