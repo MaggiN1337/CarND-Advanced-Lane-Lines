@@ -13,22 +13,26 @@ FOLDER_OUTPUT = "output_images/"
 FOLDER_CAMERA_CAL = "camera_cal/"
 FOLDER_VIDEOS_INPUT = "input_videos/"
 INPUT_VIDEO = "project_video.mp4"
-# INPUT_VIDEO = "challenge_video.mp4"
+#INPUT_VIDEO = "challenge_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
 OUTPUT_VIDEO = "lane_detected_video.mp4"
 
+# debug controls
 TEST_RUN = True
-SOBEL_KERNEL = 13
+VIDEO_LENGTH_SECONDS = 1
 
 # HYPERPARAMETERS
+SOBEL_KERNEL = 7
 # Choose the number of sliding windows
-N_WINDOWS = 9
+N_WINDOWS = 10
 # Set the width of the windows +/- margin
-WINDOW_MARGIN = 75
+WINDOW_MARGIN = 20
 # Set minimum number of pixels found to recenter window
-WINDOW_RECENTER_MIN_PIX = 25
+WINDOW_RECENTER_MIN_PIX = 40
 # Choose the width of the margin around the previous polynomial to search
-NEW_LANE_MARGIN = 60
+NEW_LANE_MARGIN = 80
+# minimum distance of lane from image borders
+MIN_LANE_OFFSET = 150
 
 
 # Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
@@ -97,6 +101,25 @@ def calibrate_camera(folder, img, obj_p, img_p):
     return mtx, dist
 
 
+def do_calibration():
+    obj_points, img_points = get_camera_cali_params()
+    cali_mtx, cali_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG, obj_points, img_points)
+    calibration_file = FOLDER_CAMERA_CAL + CALIBRATION__JPG
+    calibration_file_undistorted = cv2.undistort(cv2.imread(calibration_file), cali_mtx, cali_dist, None, cali_mtx)
+    h, w = calibration_file_undistorted.shape[:2]
+    offset = 450
+    # define source and destination points for transform
+    src = np.float32([(575, 464),
+                      (707, 464),
+                      (258, 682),
+                      (1049, 682)])
+    dst = np.float32([(offset, 0),
+                      (w - offset, 0),
+                      (offset, h),
+                      (w - offset, h)])
+    return cali_mtx, cali_dist, h, src, dst
+
+
 # from Udacity
 def s_channel_and_gradient_threshold(img):
     # Convert to HLS color space and separate the S channel
@@ -115,13 +138,13 @@ def s_channel_and_gradient_threshold(img):
     scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
 
     # Threshold x gradient
-    thresh_min = 30
-    thresh_max = 70
+    thresh_min = 20
+    thresh_max = 90
     sxbinary = np.zeros_like(scaled_sobel)
     sxbinary[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
 
     # Threshold color channel
-    s_thresh_min = 160
+    s_thresh_min = 180
     s_thresh_max = 255
     s_binary = np.zeros_like(s_channel)
     s_binary[(s_channel >= s_thresh_min) & (s_channel <= s_thresh_max)] = 1
@@ -135,6 +158,34 @@ def s_channel_and_gradient_threshold(img):
     combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
 
     return combined_binary
+
+
+# Udacity_project_1
+def region_of_interest(img, vertices):
+    """
+    Applies an image mask.
+
+    Only keeps the region of the image defined by the polygon
+    formed from `vertices`. The rest of the image is set to black.
+    `vertices` should be a numpy array of integer points.
+    """
+    # defining a blank mask to start with
+    mask = np.zeros_like(img)
+
+    # defining a 3 channel or 1 channel color to fill the mask with depending on the input image
+    if len(img.shape) > 2:
+        channel_count = img.shape[2]  # i.e. 3 or 4 depending on your image
+        ignore_mask_color = (255,) * channel_count
+    else:
+        ignore_mask_color = 255
+
+    # filling pixels inside the polygon defined by "vertices" with the fill color
+    cv2.fillPoly(mask, vertices, ignore_mask_color)
+
+    # returning the image only where mask pixels are nonzero
+    masked_image = cv2.bitwise_and(img, mask)
+
+    return masked_image
 
 
 # from Udacity
@@ -153,7 +204,17 @@ def preprocess_pipeline(img):
 
     c_binary = s_channel_and_gradient_threshold(undist_image)
 
-    warped_bin, M, Minv = unwarp(c_binary, src, dst)
+    imshape = c_binary.shape
+    vertices = np.array([[
+        (150, imshape[0]),
+        (imshape[1] / 2, 400),
+        (imshape[1] / 2, 400),
+        (imshape[1] - 150, imshape[0])]],
+        dtype=np.int32)
+
+    image_region_of_interest = region_of_interest(c_binary, vertices)
+
+    warped_bin, M, Minv = unwarp(image_region_of_interest, src, dst)
 
     # return warped_binary, M, Minv
     return warped_bin, Minv
@@ -275,7 +336,7 @@ def search_around_poly(binary_warped, left_fit, right_fit):
             (nonzerox > (left_fit[0] * (nonzeroy ** 2) + left_fit[1] * nonzeroy + left_fit[2] - NEW_LANE_MARGIN)) &
             (nonzerox < (left_fit[0] * (nonzeroy ** 2) + left_fit[1] * nonzeroy + left_fit[2] + NEW_LANE_MARGIN)))
     right_lane_inds = ((nonzerox > (
-                right_fit[0] * (nonzeroy ** 2) + right_fit[1] * nonzeroy + right_fit[2] - NEW_LANE_MARGIN)) &
+            right_fit[0] * (nonzeroy ** 2) + right_fit[1] * nonzeroy + right_fit[2] - NEW_LANE_MARGIN)) &
                        (nonzerox < (right_fit[0] * (nonzeroy ** 2) + right_fit[1] * nonzeroy + right_fit[
                            2] + NEW_LANE_MARGIN)))
 
@@ -311,7 +372,7 @@ def search_around_poly(binary_warped, left_fit, right_fit):
 
     ## End visualization steps ##
 
-    #return result, left_lane_inds, right_lane_inds, ploty
+    # return result, left_lane_inds, right_lane_inds, ploty
 
     left_fit_new, right_fit_new = (None, None)
     if len(leftx) != 0:
@@ -331,10 +392,10 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
     height = dst[1][0] - dst[0][0]
 
     # TODO: Check ft vs. meters
-    # ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
-    # xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
-    ym_per_pix = 12.0 / height  # meters per pixel in y dimension
-    xm_per_pix = 10.0 / width  # meters per pixel in x dimension
+    ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
+    xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
+    #ym_per_pix = 12.0 / height  # meters per pixel in y dimension
+    #xm_per_pix = 10.0 / width  # meters per pixel in x dimension
 
     ploty = np.linspace(0, bin_img.shape[0] - 1, bin_img.shape[0])
 
@@ -365,7 +426,7 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
                 2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
             2 * right_fit_cr[0])
 
-    if l_fit is not None and r_fit is not None:
+    if len(l_fit) == 3 and len(r_fit) == 3:
         car_position = bin_img.shape[1] / 2
         l_fit_x_int = l_fit[0] * h ** 2 + l_fit[1] * h + l_fit[2]
         r_fit_x_int = r_fit[0] * h ** 2 + r_fit[1] * h + r_fit[2]
@@ -379,7 +440,7 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
 def draw_lane(original_img, binary_img, l_fit, r_fit, Minv):
     new_img = np.copy(original_img)
 
-    if l_fit is None or r_fit is None:
+    if l_fit is None or len(l_fit) != 3 or r_fit is None or len(r_fit) != 3:
         return original_img
 
     # Create an image to draw the lines on
@@ -398,8 +459,8 @@ def draw_lane(original_img, binary_img, l_fit, r_fit, Minv):
 
     # Draw the lane onto the warped blank image
     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-    cv2.polylines(color_warp, np.int32([pts_left]), isClosed=False, color=(255, 0, 255), thickness=15)
-    cv2.polylines(color_warp, np.int32([pts_right]), isClosed=False, color=(0, 255, 255), thickness=15)
+    #cv2.polylines(color_warp, np.int32([pts_left]), isClosed=False, color=(255, 0, 255), thickness=15)
+    #cv2.polylines(color_warp, np.int32([pts_right]), isClosed=False, color=(0, 255, 255), thickness=15)
 
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = cv2.warpPerspective(color_warp, Minv, (w, h))
@@ -521,8 +582,10 @@ def write_video():
     video_output = FOLDER_OUTPUT + OUTPUT_VIDEO
 
     # To speed up the testing process you may want to try your pipeline on a shorter subclip of the video
-    input_clip = VideoFileClip(FOLDER_VIDEOS_INPUT + INPUT_VIDEO).subclip(0, 20)
-    # clip1 = VideoFileClip("test_videos/solidWhiteRight.mp4")
+    if TEST_RUN:
+        input_clip = VideoFileClip(FOLDER_VIDEOS_INPUT + INPUT_VIDEO).subclip(0, VIDEO_LENGTH_SECONDS)
+    else:
+        input_clip = VideoFileClip(FOLDER_VIDEOS_INPUT + INPUT_VIDEO)
 
     output_clip = input_clip.fl_image(process_image)
     output_clip.write_videofile(video_output, audio=False)
@@ -537,24 +600,7 @@ def write_video():
 # TODO: Warp the detected lane boundaries back onto the original image.
 # TODO: Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
 
-
-obj_points, img_points = get_camera_cali_params()
-cali_mtx, cali_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG, obj_points, img_points)
-calibration_file = FOLDER_CAMERA_CAL + CALIBRATION__JPG
-calibration_file_undistorted = cv2.undistort(cv2.imread(calibration_file), cali_mtx, cali_dist, None, cali_mtx)
-
-h, w = calibration_file_undistorted.shape[:2]
-offset = 450
-# define source and destination points for transform
-src = np.float32([(575, 464),
-                  (707, 464),
-                  (258, 682),
-                  (1049, 682)])
-dst = np.float32([(offset, 0),
-                  (w - offset, 0),
-                  (offset, h),
-                  (w - offset, h)])
-
+cali_mtx, cali_dist, h, src, dst = do_calibration()
 l_line = Line()
 r_line = Line()
 write_video()
