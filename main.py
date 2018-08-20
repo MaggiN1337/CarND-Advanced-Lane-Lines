@@ -19,7 +19,7 @@ OUTPUT_VIDEO = "lane_detected_video.mp4"
 
 # debug controls
 TEST_RUN = True
-VIDEO_LENGTH_SUB = (0, 2)
+VIDEO_LENGTH_SUB = (23, 26)
 VISUALIZATION = False
 REGION_OF_INTEREST = True
 
@@ -285,10 +285,10 @@ def region_of_interest(img):
     """
 
     vertices = np.array([[
-        (MIN_LANE_OFFSET, img.shape[0]-50),
+        (MIN_LANE_OFFSET, img.shape[0] - 50),
         (img.shape[1] / 2 - 50, img.shape[0] / 2 + 50),
         (img.shape[1] / 2 + 50, img.shape[0] / 2 + 50),
-        (img.shape[1] - MIN_LANE_OFFSET, img.shape[0]-50)]],
+        (img.shape[1] - MIN_LANE_OFFSET, img.shape[0] - 50)]],
         dtype=np.int32)
 
     # defining a blank mask to start with
@@ -326,17 +326,17 @@ def preprocess_pipeline(img):
 
     if REGION_OF_INTEREST:
         img = region_of_interest(img)
-        save_image_as_png(img, "5_", "image_region_of_interest")
+        if VISUALIZATION: save_image_as_png(img, "5_", "image_region_of_interest")
 
     img = cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx)
-    save_image_as_png(img, "6_", "undistorted")
+    if VISUALIZATION: save_image_as_png(img, "6_", "undistorted")
 
     img, M, Minv = unwarp(img, src, dst)
 
     img = color_threshold(img)
 
     img = edge_detection(img)
-    save_image_as_png(img, "7_", "edge")
+    if VISUALIZATION: save_image_as_png(img, "7_", "edge")
 
     # return warped_binary, M, Minv
     return img, Minv
@@ -392,7 +392,7 @@ def find_lane_pixels(binary_warped):
         # Draw the windows on the visualization image
         cv2.rectangle(out_img, (win_xleft_low, win_y_low), (win_xleft_high, win_y_high), (0, 255, 0), 2)
         cv2.rectangle(out_img, (win_xright_low, win_y_low), (win_xright_high, win_y_high), (0, 255, 0), 2)
-        save_image_as_png(out_img, "9_", "sliding_window")
+        if VISUALIZATION: save_image_as_png(out_img, "9_", "sliding_window")
 
         # Identify the nonzero pixels in x and y within the window #
         good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) &
@@ -428,21 +428,6 @@ def find_lane_pixels(binary_warped):
         right_fit = np.polyfit(righty, rightx, 2)
 
     return left_fit, right_fit, left_lane_inds, right_lane_inds, rectangle_data, histogram
-
-
-def fit_polynomal(binary_warped, left_fit, right_fit):
-    # Generate x and y values for plotting
-    ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-    try:
-        left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-        right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
-    except TypeError:
-        # Avoids an error if `left` and `right_fit` are still none or incorrect
-        print('The function failed to fit a line!')
-        left_fitx = 1 * ploty ** 2 + 1 * ploty
-        right_fitx = 1 * ploty ** 2 + 1 * ploty
-
-    return left_fitx, right_fitx, ploty
 
 
 def search_around_poly(binary_warped, left_fit, right_fit):
@@ -511,22 +496,22 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
     # Calculates the curvature of polynomial functions in pixels.
 
     # Define conversions in x and y from pixels space to meters
-    width = dst[3][1] - dst[0][1]
-    height = dst[1][0] - dst[0][0]
+    width = 700
+    height = 720
 
-    # TODO: Check ft vs. meters
+    # TODO: Fix meters
     # ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
     # xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
     ym_per_pix = 30 / 720  # meters per pixel in y dimension
     xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
     # ym_per_pix = 12.0 / height  # meters per pixel in y dimension
     # xm_per_pix = 10.0 / width  # meters per pixel in x dimension
+    #ym_per_pix, xm_per_pix = 0.1, 0.1
 
-    ploty = np.linspace(0, bin_img.shape[0] - 1, bin_img.shape[0])
 
     # Define y-value where we want radius of curvature
     # We'll choose the maximum y-value, corresponding to the bottom of the image
-    y_eval = np.max(ploty) * ym_per_pix
+    y_eval = bin_img.shape[1]
 
     # Identify the x and y positions of all nonzero pixels in the image
     nonzero = bin_img.nonzero()
@@ -538,19 +523,18 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
     rightx = nonzerox[r_lane_inds]
     righty = nonzeroy[r_lane_inds]
 
-    left_curverad, right_curverad, distance_from_center = (0, 0, 0)
+    left_curverad, right_curverad, distance_from_center = 0, 0, 0
 
+    # calculate radius
     if len(leftx) != 0 and len(rightx) != 0:
         # Fit new polynomials to x,y in world space
         left_fit_cr = np.polyfit(lefty * ym_per_pix, leftx * xm_per_pix, 2)
         right_fit_cr = np.polyfit(righty * ym_per_pix, rightx * xm_per_pix, 2)
         # Calculate the new radii of curvature
-        left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-            2 * left_fit_cr[0])
-        right_curverad = ((1 + (
-                2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-            2 * right_fit_cr[0])
+        left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit_cr[0])
+        right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit_cr[0])
 
+    # calculate distance from center
     if len(l_fit) == 3 and len(r_fit) == 3:
         car_position = bin_img.shape[1] / 2
         l_fit_x_int = l_fit[0] * h ** 2 + l_fit[1] * h + l_fit[2]
@@ -558,7 +542,7 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
         lane_center_position = (r_fit_x_int + l_fit_x_int) / 2
         distance_from_center = (car_position - lane_center_position) * xm_per_pix
 
-    return left_curverad, right_curverad, distance_from_center
+    return ((left_curverad + right_curverad) / 2.), distance_from_center
 
 
 # from Udacity project lines on original image
@@ -624,26 +608,14 @@ def process_image(img):
     else:
         l_fit, r_fit, l_lane_inds, r_lane_inds = search_around_poly(img_bin, l_line.best_fit, r_line.best_fit)
 
-    # invalidate both fits if the difference in their x-intercepts isn't around 350 px (+/- 100 px)
-    # if l_fit is not None and r_fit is not None:
-    #     # calculate x-intercept (bottom of image, x=image_height) for fits
-    #     h = img.shape[0]
-    #     l_fit_x_int = l_fit[0] * h ** 2 + l_fit[1] * h + l_fit[2]
-    #     r_fit_x_int = r_fit[0] * h ** 2 + r_fit[1] * h + r_fit[2]
-    #     x_int_diff = abs(r_fit_x_int - l_fit_x_int)
-    #     if abs(350 - x_int_diff) > 100:
-    #         l_fit = None
-    #         r_fit = None
-
     l_line.add_fit(l_fit, l_lane_inds)
     r_line.add_fit(r_fit, r_lane_inds)
 
     # draw the current best fit if it exists
-    if l_line.best_fit is not None and r_line.best_fit is not None:
+    if l_fit is not None and r_fit is not None:
         output_image = draw_lane(new_img, img_bin, l_fit, r_fit, Minv)
-        rad_l, rad_r, d_center = measure_curvature_and_center_distance(new_img, l_fit, r_fit,
-                                                                       l_lane_inds, r_lane_inds)
-        output_image = draw_data(output_image, (rad_l + rad_r) / 2, d_center)
+        radius, d_center = measure_curvature_and_center_distance(new_img, l_fit, r_fit, l_lane_inds, r_lane_inds)
+        output_image = draw_data(output_image, radius, d_center)
     else:
         output_image = new_img
 
