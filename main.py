@@ -13,13 +13,13 @@ FOLDER_OUTPUT = "output_images/"
 FOLDER_CAMERA_CAL = "camera_cal/"
 FOLDER_VIDEOS_INPUT = "input_videos/"
 INPUT_VIDEO = "project_video.mp4"
-#INPUT_VIDEO = "challenge_video.mp4"
+# INPUT_VIDEO = "challenge_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
 OUTPUT_VIDEO = "lane_detected_video.mp4"
 
 # debug controls
 TEST_RUN = True
-VIDEO_LENGTH_SUB = (20, 26)
+VIDEO_LENGTH_SUB = (0, 2)
 VISUALIZATION = False
 
 # HYPERPARAMETERS
@@ -33,11 +33,11 @@ S_CH_THRES_MAX = 255
 # Choose the number of sliding windows
 N_WINDOWS = 10
 # Set the width of the windows +/- margin
-WINDOW_MARGIN = 70
+WINDOW_MARGIN = 80
 # Set minimum number of pixels found to recenter window
-WINDOW_RECENTER_MIN_PIX = 40
+WINDOW_RECENTER_MIN_PIX = 50
 # Choose the width of the margin around the previous polynomial to search
-NEW_LANE_MARGIN = 70
+NEW_LANE_MARGIN = 80
 # minimum distance of lane from image borders
 MIN_LANE_OFFSET = 150
 
@@ -152,11 +152,13 @@ def s_channel_and_gradient_threshold(img):
 
     # Stack each channel to view their individual contributions in green and blue respectively
     # This returns a stack of the two binary images, whose components you can see as different colors
-    color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
+    color_binary = np.dstack((np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
     save_image_as_png(color_binary, "66", "color_binary")
     # Combine the two binary thresholds
     combined_binary = np.zeros_like(sxbinary)
     combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
+
+
 
     return combined_binary
 
@@ -202,13 +204,8 @@ def unwarp(img, src, dst):
 
 def preprocess_pipeline(img):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    undist_image = cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx)
-    save_image_as_png(undist_image, "5_", "undistorted")
 
-    c_binary = s_channel_and_gradient_threshold(undist_image)
-    save_image_as_png(c_binary, "6_", "c_binary")
-
-    imshape = c_binary.shape
+    imshape = img.shape
     vertices = np.array([[
         (150, imshape[0]),
         (imshape[1] / 2, 400),
@@ -216,10 +213,16 @@ def preprocess_pipeline(img):
         (imshape[1] - 150, imshape[0])]],
         dtype=np.int32)
 
-    image_region_of_interest = region_of_interest(c_binary, vertices)
-    save_image_as_png(image_region_of_interest, "7_", "image_region_of_interest")
+    image_region_of_interest = region_of_interest(img, vertices)
+    save_image_as_png(image_region_of_interest, "5_", "image_region_of_interest")
 
-    warped_bin, M, Minv = unwarp(image_region_of_interest, src, dst)
+    undist_image = cv2.undistort(image_region_of_interest, cali_mtx, cali_dist, None, cali_mtx)
+    save_image_as_png(undist_image, "6_", "undistorted")
+
+    c_binary = s_channel_and_gradient_threshold(undist_image)
+    save_image_as_png(c_binary, "7_", "c_binary")
+
+    warped_bin, M, Minv = unwarp(c_binary, src, dst)
     save_image_as_png(warped_bin, "8_", "warped_bin")
 
     # return warped_binary, M, Minv
@@ -229,11 +232,14 @@ def preprocess_pipeline(img):
 def histogram(img):
     # Grab only the bottom half of the image
     # Lane lines are likely to be mostly vertical nearest to the car
-    bottom_half = img[img.shape[0] // 2:, :]
+    #bottom_half = img[img.shape[0] // 2:, :]
 
     # Sum across image pixels vertically - make sure to set an `axis`
     # i.e. the highest areas of vertical lines should be larger values
-    histo = np.sum(bottom_half, axis=0)
+    #histo = np.sum(bottom_half, axis=0)
+
+    half = int(img.shape[0] / 2)
+    histo = np.sum(img[half:, :], axis=0)
 
     return histo
 
@@ -241,6 +247,8 @@ def histogram(img):
 def find_lane_pixels(binary_warped):
     # Take a histogram of the bottom half of the image
     hist = histogram(binary_warped)
+
+    out_img = np.dstack((binary_warped, binary_warped, binary_warped)) * 255
 
     # Create an output image to draw on and visualize the result
     rectangle_data = []
@@ -281,6 +289,10 @@ def find_lane_pixels(binary_warped):
         win_xright_high = rightx_current + WINDOW_MARGIN
 
         rectangle_data.append((win_y_low, win_y_high, win_xleft_low, win_xleft_high, win_xright_low, win_xright_high))
+        # Draw the windows on the visualization image
+        cv2.rectangle(out_img, (win_xleft_low, win_y_low), (win_xleft_high, win_y_high), (0, 255, 0), 2)
+        cv2.rectangle(out_img, (win_xright_low, win_y_low), (win_xright_high, win_y_high), (0, 255, 0), 2)
+        save_image_as_png(out_img, "9_", "sliding_window")
 
         # Identify the nonzero pixels in x and y within the window #
         good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) &
@@ -314,6 +326,9 @@ def find_lane_pixels(binary_warped):
         left_fit = np.polyfit(lefty, leftx, 2)
     if len(rightx) != 0:
         right_fit = np.polyfit(righty, rightx, 2)
+
+    fig = plt.hist(hist, normed=0)
+    plt.savefig(FOLDER_OUTPUT + "10_histogram.png")
 
     return left_fit, right_fit, left_lane_inds, right_lane_inds, rectangle_data, hist
 
@@ -403,12 +418,12 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
     height = dst[1][0] - dst[0][0]
 
     # TODO: Check ft vs. meters
-    #ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
-    #xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
-    ym_per_pix = 30/720 # meters per pixel in y dimension
-    xm_per_pix = 3.7/700 # meters per pixel in x dimension
-    #ym_per_pix = 12.0 / height  # meters per pixel in y dimension
-    #xm_per_pix = 10.0 / width  # meters per pixel in x dimension
+    # ym_per_pix = 3.048/100 # meters per pixel in y dimension, lane line is 10 ft = 3.048 meters
+    # xm_per_pix = 3.7/378 # meters per pixel in x dimension, lane width is 12 ft = 3.7 meters
+    ym_per_pix = 30 / 720  # meters per pixel in y dimension
+    xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
+    # ym_per_pix = 12.0 / height  # meters per pixel in y dimension
+    # xm_per_pix = 10.0 / width  # meters per pixel in x dimension
 
     ploty = np.linspace(0, bin_img.shape[0] - 1, bin_img.shape[0])
 
@@ -450,19 +465,19 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
 
 
 # TODO: from Udacity project lines on original image
-def draw_lane(original_img, binary_img, l_fit, r_fit, Minv):
-    new_img = np.copy(original_img)
+def draw_lane(original_img, warped_img, l_fit, r_fit, Minv):
+    #new_img = np.copy(original_img)
 
     # TODO: FIND BUG HERE
     if l_fit is None or r_fit is None:
-    #if l_fit is None or len(l_fit) != 3 or r_fit is None or len(r_fit) != 3:
+        # if l_fit is None or len(l_fit) != 3 or r_fit is None or len(r_fit) != 3:
         return original_img
 
     # Create an image to draw the lines on
-    warp_zero = np.zeros_like(binary_img).astype(np.uint8)
+    warp_zero = np.zeros_like(warped_img).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
-    h, w = binary_img.shape[:2]
+    h, w = original_img.shape[:2]
     ploty = np.linspace(0, h - 1, num=h)
     left_fitx = l_fit[0] * ploty ** 2 + l_fit[1] * ploty + l_fit[2]
     right_fitx = r_fit[0] * ploty ** 2 + r_fit[1] * ploty + r_fit[2]
@@ -474,13 +489,11 @@ def draw_lane(original_img, binary_img, l_fit, r_fit, Minv):
 
     # Draw the lane onto the warped blank image
     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-    #cv2.polylines(color_warp, np.int32([pts_left]), isClosed=False, color=(255, 0, 255), thickness=15)
-    #cv2.polylines(color_warp, np.int32([pts_right]), isClosed=False, color=(0, 255, 255), thickness=15)
 
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = cv2.warpPerspective(color_warp, Minv, (w, h))
     # Combine the result with the original image
-    result = cv2.addWeighted(new_img, 1, newwarp, 0.5, 0)
+    result = cv2.addWeighted(original_img, 1, newwarp, 0.3, 0)
     return result
 
 
@@ -532,7 +545,7 @@ def process_image(img):
     # draw the current best fit if it exists
     if l_line.best_fit is not None and r_line.best_fit is not None:
         output_image = draw_lane(new_img, img_bin, l_line.best_fit, r_line.best_fit, Minv)
-        rad_l, rad_r, d_center = measure_curvature_and_center_distance(img_bin, l_line.best_fit, r_line.best_fit,
+        rad_l, rad_r, d_center = measure_curvature_and_center_distance(new_img, l_line.best_fit, r_line.best_fit,
                                                                        l_lane_inds, r_lane_inds)
         output_image = draw_data(output_image, (rad_l + rad_r) / 2, d_center)
     else:
@@ -588,9 +601,9 @@ class Line():
             if len(self.current_fit) > 0:
                 # throw out oldest fit
                 self.current_fit = self.current_fit[:len(self.current_fit) - 1]
-            if len(self.current_fit) > 0:
-                # if there are still any fits in the queue, best_fit is their average
-                self.best_fit = np.average(self.current_fit, axis=0)
+            # if len(self.current_fit) > 0:
+            # if there are still any fits in the queue, best_fit is their average
+            # self.best_fit = np.average(self.current_fit, axis=0)
 
 
 def write_video():
