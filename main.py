@@ -1,24 +1,20 @@
-import numpy as np
-import cv2
 import glob
+import cv2
+import numpy as np
 from moviepy.editor import VideoFileClip
 
 CALIBRATION__JPG = "calibration1.jpg"
-TRANSFORMATION__JPG = "test6.jpg"
-TRANSFORMATION2__JPG = "test4.jpg"
-FOLDER_TEST_INPUT = "test_images/"
 FOLDER_OUTPUT = "output_images/"
 FOLDER_CAMERA_CAL = "camera_cal/"
 FOLDER_VIDEOS_INPUT = "input_videos/"
 INPUT_VIDEO = "project_video.mp4"
 # INPUT_VIDEO = "challenge_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
-OUTPUT_VIDEO = "lane_detected_video.mp4"
 
 # debug controls
 TEST_RUN = False
 VISUALIZATION = False
-VIDEO_LENGTH_SUB = (10, 12)
+VIDEO_LENGTH_SUB = (10, 11)
 
 # preprocessing techniques
 REGION_OF_INTEREST = True
@@ -37,6 +33,11 @@ WINDOW_RECENTER_MIN_PIX = 5
 NEW_LANE_MARGIN = 80
 # minimum distance of lane from image borders
 MIN_LANE_OFFSET = 100
+
+
+# save image as png to OUTPUT_FOLDER
+def save_image_as_png(img, prefix, filename):
+    cv2.imwrite(FOLDER_OUTPUT + prefix + filename + ".png", img)
 
 
 # Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
@@ -73,11 +74,6 @@ def get_camera_cali_params():
         else:
             print("No corners found in image: " + fname)
     return objpoints, imgpoints
-
-
-# save image as png to OUTPUT_FOLDER
-def save_image_as_png(img, prefix, filename):
-    cv2.imwrite(FOLDER_OUTPUT + prefix + filename + ".png", img)
 
 
 # get coefficients from camera calibration
@@ -475,6 +471,8 @@ def draw_lane(original_img, warped_img, l_fit, r_fit, Minv):
 
     # Draw the lane onto the warped blank image
     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
+    cv2.polylines(color_warp, np.int32([pts_left]), isClosed=False, color=(255, 0, 255), thickness=5)
+    cv2.polylines(color_warp, np.int32([pts_right]), isClosed=False, color=(0, 255, 255), thickness=5)
 
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = cv2.warpPerspective(color_warp, Minv, (w, h))
@@ -588,7 +586,7 @@ class Line():
 
 
 def write_video():
-    video_output = FOLDER_OUTPUT + OUTPUT_VIDEO
+    video_output = FOLDER_OUTPUT + "lane_detected_" + INPUT_VIDEO
 
     # To speed up the testing process you may want to try your pipeline on a shorter subclip of the video
     if TEST_RUN:
