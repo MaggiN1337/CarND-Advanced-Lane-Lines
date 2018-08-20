@@ -21,9 +21,10 @@ OUTPUT_VIDEO = "lane_detected_video.mp4"
 TEST_RUN = True
 VIDEO_LENGTH_SUB = (0, 2)
 VISUALIZATION = False
+REGION_OF_INTEREST = True
 
 # HYPERPARAMETERS
-SOBEL_KERNEL = 13
+SOBEL_KERNEL = 7
 # Threshold x gradient
 X_THRES_MIN = 20
 X_THRES_MAX = 90
@@ -33,13 +34,13 @@ S_CH_THRES_MAX = 255
 # Choose the number of sliding windows
 N_WINDOWS = 10
 # Set the width of the windows +/- margin
-WINDOW_MARGIN = 80
+WINDOW_MARGIN = 20
 # Set minimum number of pixels found to recenter window
-WINDOW_RECENTER_MIN_PIX = 50
+WINDOW_RECENTER_MIN_PIX = 5
 # Choose the width of the margin around the previous polynomial to search
 NEW_LANE_MARGIN = 80
 # minimum distance of lane from image borders
-MIN_LANE_OFFSET = 150
+MIN_LANE_OFFSET = 100
 
 
 # Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
@@ -113,17 +114,19 @@ def do_calibration():
     cali_mtx, cali_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG, obj_points, img_points)
     calibration_file = FOLDER_CAMERA_CAL + CALIBRATION__JPG
     calibration_file_undistorted = cv2.undistort(cv2.imread(calibration_file), cali_mtx, cali_dist, None, cali_mtx)
+
     h, w = calibration_file_undistorted.shape[:2]
-    offset = 450
     # define source and destination points for transform
-    src = np.float32([(575, 464),
-                      (707, 464),
-                      (258, 682),
-                      (1049, 682)])
-    dst = np.float32([(offset, 0),
-                      (w - offset, 0),
-                      (offset, h),
-                      (w - offset, h)])
+    src = np.float32([(540, 488),
+                      (750, 488),
+                      (777, 508),
+                      (507, 508)])
+
+    dst = np.float32([(600, 300),
+                      (700, 300),
+                      (700, 420),
+                      (600, 420)])
+
     return cali_mtx, cali_dist, h, src, dst
 
 
@@ -153,18 +156,126 @@ def s_channel_and_gradient_threshold(img):
     # Stack each channel to view their individual contributions in green and blue respectively
     # This returns a stack of the two binary images, whose components you can see as different colors
     color_binary = np.dstack((np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
-    save_image_as_png(color_binary, "66", "color_binary")
     # Combine the two binary thresholds
     combined_binary = np.zeros_like(sxbinary)
     combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
 
-
+    save_image_as_png(color_binary, "7_", "color_binary")
 
     return combined_binary
 
 
+def color_threshold(image):
+    """
+    Removes pixels that are not within the color ranges
+    :param image:
+    :return:
+    """
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
+    white_mask = cv2.inRange(
+        image,
+        lowerb=np.array([int(0.0 * 255), int(0.0 * 255), int(0.80 * 255)], dtype="uint8"),
+        upperb=np.array([int(1.0 * 255), int(0.10 * 255), int(1.0 * 255)], dtype="uint8")
+    )
+
+    yellow_mask = cv2.inRange(
+        image,
+        lowerb=np.array([int(0.2 * 255), int(0.3 * 255), int(0.10 * 255)], dtype="uint8"),
+        upperb=np.array([int(0.6 * 255), int(0.8 * 255), int(0.90 * 255)], dtype="uint8")
+    )
+    image = cv2.bitwise_or(
+        white_mask,
+        yellow_mask
+    )
+
+    return image
+
+
+def edge_detection(image):
+    """
+    Using the Sobel filter, find the edge pixels for the lane lines
+    :param image:
+    :return:
+    """
+
+    # Convert to grayscale
+    # image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+    # Define a function that takes an image, gradient orientation,
+    # and threshold min / max values.
+    def abs_sobel_thresh(img, orient='x', thresh=None, sobel_kernel=None):
+        thresh_min = thresh[0]
+        thresh_max = thresh[1]
+        # Apply x or y gradient with the OpenCV Sobel() function
+        # and take the absolute value
+        # Convert to grayscale
+        gray = img
+        if orient == 'x':
+            abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel))
+        elif orient == 'y':
+            abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel))
+        else:
+            raise Exception('Invalid `orient`')
+        # Rescale back to 8 bit integer
+        scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
+        # Create a copy and apply the threshold
+        binary_output = np.zeros_like(scaled_sobel)
+        # Here I'm using inclusive (>=, <=) thresholds, but exclusive is ok too
+        binary_output[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+
+        # Return the result
+        return binary_output
+
+    # Define a function to return the magnitude of the gradient
+    # for a given sobel kernel size and threshold values
+    def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
+        # Convert to grayscale
+        gray = img
+        # Take both Sobel x and y gradients
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+        # Calculate the gradient magnitude
+        gradmag = np.sqrt(sobelx ** 2 + sobely ** 2)
+        # Rescale to 8 bit
+        scale_factor = np.max(gradmag) / 255
+        gradmag = (gradmag / scale_factor).astype(np.uint8)
+        # Create a binary image of ones where threshold is met, zeros otherwise
+        binary_output = np.zeros_like(gradmag)
+        binary_output[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
+
+        # Return the binary image
+        return binary_output
+
+    def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi / 2)):
+        # Grayscale
+        # Calculate the x and y gradients
+        gray = image
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+        # Take the absolute value of the gradient direction,
+        # apply a threshold, and create a binary image result
+        absgraddir = np.arctan2(np.absolute(sobely), np.absolute(sobelx))
+        binary_output = np.zeros_like(absgraddir)
+        binary_output[(absgraddir >= thresh[0]) & (absgraddir <= thresh[1])] = 1
+
+        # Return the binary image
+        return binary_output
+
+    # Apply each of the thresholding functions
+    gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=SOBEL_KERNEL, thresh=(0, 30))
+    grady = abs_sobel_thresh(image, orient='y', sobel_kernel=SOBEL_KERNEL, thresh=(20, 90))
+    mag_binary = mag_thresh(image, sobel_kernel=SOBEL_KERNEL, mag_thresh=(0, 10))
+    dir_binary = dir_threshold(image, sobel_kernel=SOBEL_KERNEL, thresh=(0, np.pi / 4))
+
+    combined = np.zeros_like(dir_binary)
+    combined[((gradx == 0) & (grady == 0)) | ((mag_binary == 0) & (dir_binary == 0))] = 255
+
+    return combined
+
+
 # Udacity_project_1
-def region_of_interest(img, vertices):
+def region_of_interest(img):
     """
     Applies an image mask.
 
@@ -172,6 +283,14 @@ def region_of_interest(img, vertices):
     formed from `vertices`. The rest of the image is set to black.
     `vertices` should be a numpy array of integer points.
     """
+
+    vertices = np.array([[
+        (MIN_LANE_OFFSET, img.shape[0]-50),
+        (img.shape[1] / 2 - 50, img.shape[0] / 2 + 50),
+        (img.shape[1] / 2 + 50, img.shape[0] / 2 + 50),
+        (img.shape[1] - MIN_LANE_OFFSET, img.shape[0]-50)]],
+        dtype=np.int32)
+
     # defining a blank mask to start with
     mask = np.zeros_like(img)
 
@@ -205,48 +324,28 @@ def unwarp(img, src, dst):
 def preprocess_pipeline(img):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    imshape = img.shape
-    vertices = np.array([[
-        (150, imshape[0]),
-        (imshape[1] / 2, 400),
-        (imshape[1] / 2, 400),
-        (imshape[1] - 150, imshape[0])]],
-        dtype=np.int32)
+    if REGION_OF_INTEREST:
+        img = region_of_interest(img)
+        save_image_as_png(img, "5_", "image_region_of_interest")
 
-    image_region_of_interest = region_of_interest(img, vertices)
-    save_image_as_png(image_region_of_interest, "5_", "image_region_of_interest")
+    img = cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx)
+    save_image_as_png(img, "6_", "undistorted")
 
-    undist_image = cv2.undistort(image_region_of_interest, cali_mtx, cali_dist, None, cali_mtx)
-    save_image_as_png(undist_image, "6_", "undistorted")
+    img, M, Minv = unwarp(img, src, dst)
 
-    c_binary = s_channel_and_gradient_threshold(undist_image)
-    save_image_as_png(c_binary, "7_", "c_binary")
+    img = color_threshold(img)
 
-    warped_bin, M, Minv = unwarp(c_binary, src, dst)
-    save_image_as_png(warped_bin, "8_", "warped_bin")
+    img = edge_detection(img)
+    save_image_as_png(img, "7_", "edge")
 
     # return warped_binary, M, Minv
-    return warped_bin, Minv
-
-
-def histogram(img):
-    # Grab only the bottom half of the image
-    # Lane lines are likely to be mostly vertical nearest to the car
-    #bottom_half = img[img.shape[0] // 2:, :]
-
-    # Sum across image pixels vertically - make sure to set an `axis`
-    # i.e. the highest areas of vertical lines should be larger values
-    #histo = np.sum(bottom_half, axis=0)
-
-    half = int(img.shape[0] / 2)
-    histo = np.sum(img[half:, :], axis=0)
-
-    return histo
+    return img, Minv
 
 
 def find_lane_pixels(binary_warped):
     # Take a histogram of the bottom half of the image
-    hist = histogram(binary_warped)
+    half = int(binary_warped.shape[0] / 2)
+    histogram = np.sum(binary_warped[half:, :], axis=0)
 
     out_img = np.dstack((binary_warped, binary_warped, binary_warped)) * 255
 
@@ -255,24 +354,25 @@ def find_lane_pixels(binary_warped):
 
     # Find the peak of the left and right halves of the histogram
     # These will be the starting point for the left and right lines
-    midpoint = np.int(hist.shape[0] // 2)
-    leftx_base = np.argmax(hist[:midpoint])
-    rightx_base = np.argmax(hist[midpoint:]) + midpoint
-    # Current positions to be updated later for each window in nwindows
-    if leftx_base < MIN_LANE_OFFSET:
-        leftx_base = MIN_LANE_OFFSET
-
-    if rightx_base > binary_warped.shape[1] - MIN_LANE_OFFSET:
-        rightx_base = binary_warped.shape[1] - MIN_LANE_OFFSET
-    leftx_current = leftx_base
-    rightx_current = rightx_base
+    midpoint = np.int(histogram.shape[0] / 2)
+    leftx_base = np.argmax(histogram[:midpoint])
+    rightx_base = np.argmax(histogram[midpoint:]) + midpoint
+    # if leftx_base < MIN_LANE_OFFSET:
+    #     leftx_base = MIN_LANE_OFFSET
+    #
+    # if rightx_base > binary_warped.shape[1] - MIN_LANE_OFFSET:
+    #     rightx_base = binary_warped.shape[1] - MIN_LANE_OFFSET
 
     # Set height of windows - based on nwindows above and image shape
-    window_height = np.int(binary_warped.shape[0] // N_WINDOWS)
+    window_height = np.int(binary_warped.shape[0] / N_WINDOWS)
     # Identify the x and y positions of all nonzero pixels in the image
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
+
+    # Current positions to be updated later for each window in nwindows
+    leftx_current = leftx_base
+    rightx_current = rightx_base
 
     # Create empty lists to receive left and right lane pixel indices
     left_lane_inds = []
@@ -327,10 +427,7 @@ def find_lane_pixels(binary_warped):
     if len(rightx) != 0:
         right_fit = np.polyfit(righty, rightx, 2)
 
-    fig = plt.hist(hist, normed=0)
-    plt.savefig(FOLDER_OUTPUT + "10_histogram.png")
-
-    return left_fit, right_fit, left_lane_inds, right_lane_inds, rectangle_data, hist
+    return left_fit, right_fit, left_lane_inds, right_lane_inds, rectangle_data, histogram
 
 
 def fit_polynomal(binary_warped, left_fit, right_fit):
@@ -464,11 +561,10 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, l_lane_inds, r_
     return left_curverad, right_curverad, distance_from_center
 
 
-# TODO: from Udacity project lines on original image
+# from Udacity project lines on original image
 def draw_lane(original_img, warped_img, l_fit, r_fit, Minv):
-    #new_img = np.copy(original_img)
+    # new_img = np.copy(original_img)
 
-    # TODO: FIND BUG HERE
     if l_fit is None or r_fit is None:
         # if l_fit is None or len(l_fit) != 3 or r_fit is None or len(r_fit) != 3:
         return original_img
@@ -529,23 +625,23 @@ def process_image(img):
         l_fit, r_fit, l_lane_inds, r_lane_inds = search_around_poly(img_bin, l_line.best_fit, r_line.best_fit)
 
     # invalidate both fits if the difference in their x-intercepts isn't around 350 px (+/- 100 px)
-    if l_fit is not None and r_fit is not None:
-        # calculate x-intercept (bottom of image, x=image_height) for fits
-        h = img.shape[0]
-        l_fit_x_int = l_fit[0] * h ** 2 + l_fit[1] * h + l_fit[2]
-        r_fit_x_int = r_fit[0] * h ** 2 + r_fit[1] * h + r_fit[2]
-        x_int_diff = abs(r_fit_x_int - l_fit_x_int)
-        if abs(350 - x_int_diff) > 100:
-            l_fit = None
-            r_fit = None
+    # if l_fit is not None and r_fit is not None:
+    #     # calculate x-intercept (bottom of image, x=image_height) for fits
+    #     h = img.shape[0]
+    #     l_fit_x_int = l_fit[0] * h ** 2 + l_fit[1] * h + l_fit[2]
+    #     r_fit_x_int = r_fit[0] * h ** 2 + r_fit[1] * h + r_fit[2]
+    #     x_int_diff = abs(r_fit_x_int - l_fit_x_int)
+    #     if abs(350 - x_int_diff) > 100:
+    #         l_fit = None
+    #         r_fit = None
 
     l_line.add_fit(l_fit, l_lane_inds)
     r_line.add_fit(r_fit, r_lane_inds)
 
     # draw the current best fit if it exists
     if l_line.best_fit is not None and r_line.best_fit is not None:
-        output_image = draw_lane(new_img, img_bin, l_line.best_fit, r_line.best_fit, Minv)
-        rad_l, rad_r, d_center = measure_curvature_and_center_distance(new_img, l_line.best_fit, r_line.best_fit,
+        output_image = draw_lane(new_img, img_bin, l_fit, r_fit, Minv)
+        rad_l, rad_r, d_center = measure_curvature_and_center_distance(new_img, l_fit, r_fit,
                                                                        l_lane_inds, r_lane_inds)
         output_image = draw_data(output_image, (rad_l + rad_r) / 2, d_center)
     else:
