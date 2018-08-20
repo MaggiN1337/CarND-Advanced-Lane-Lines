@@ -20,17 +20,13 @@ TEST_RUN = False
 VISUALIZATION = False
 VIDEO_LENGTH_SUB = (10, 12)
 
-# HYPERPARAMETERS
+# preprocessing techniques
 REGION_OF_INTEREST = True
 COLOR_THRESHOLD = True  # without focus on white and yellow, the frame of interested region is misunderstood
 S_CHANNEL = True
+
+# HYPERPARAMETERS
 SOBEL_KERNEL = 7
-# Threshold x gradient
-X_THRES_MIN = 20
-X_THRES_MAX = 90
-# Threshold color channel
-S_CH_THRES_MIN = 170
-S_CH_THRES_MAX = 255
 # Choose the number of sliding windows
 N_WINDOWS = 10
 # Set the width of the windows +/- margin
