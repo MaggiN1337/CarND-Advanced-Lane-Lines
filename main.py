@@ -17,8 +17,8 @@ OUTPUT_VIDEO = "lane_detected_video.mp4"
 
 # debug controls
 TEST_RUN = False
-VIDEO_LENGTH_SUB = (10, 12)
 VISUALIZATION = False
+VIDEO_LENGTH_SUB = (10, 12)
 
 # HYPERPARAMETERS
 REGION_OF_INTEREST = True
@@ -526,8 +526,13 @@ def process_image(img):
     # draw the current best fit if it exists
     if l_fit is not None and r_fit is not None:
         output_image = draw_lane(new_img, img_bin, l_fit, r_fit, Minv)
+        if VISUALIZATION:
+            save_image_as_png(cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR), "8_", "annotate_lane")
+
         radius, d_center = measure_curvature_and_center_distance(new_img, l_fit, r_fit, leftx, rightx, lefty, righty)
         output_image = draw_data(output_image, radius, d_center)
+        if VISUALIZATION:
+            save_image_as_png(cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR), "9_", "meta_information")
     else:
         output_image = new_img
 
