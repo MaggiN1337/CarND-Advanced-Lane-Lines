@@ -49,7 +49,7 @@ You're reading it!
 
 #### 1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.
 
-The code for this step is between lines 43 and 108.
+The code for this step is between lines 43 and 109.
 
 I start by preparing "object points", which will be the (x, y, z) coordinates of the chessboard corners in the world. Here I am assuming the chessboard is fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image.  Thus, `objp` is just a replicated array of coordinates, and `objpoints` will be appended with a copy of it every time I successfully detect all chessboard corners in a test image.  `imgpoints` will be appended with the (x, y) pixel position of each of the corners in the image plane with each successful chessboard detection. Therefore, I simply used the `cv2.findChessboardCorners` and `cv2.drawChessboardCorners()` methods in my method `get_camera_cali_params()`, to find and draw the detections, as shown here:
 
@@ -61,6 +61,13 @@ I then used the output `objpoints` and `imgpoints` to compute the camera calibra
 
 ### Pipeline (single images)
 
+I implemented the pipeline in ``process_image()`` in lines 520 to 550. 
+1. Preprocess the image
+2. Detect lane pixels (from scrath or based on previous image)
+3. Draw lanes on image
+4. Calculate curve radius and distance from lane-center
+5. Add calculations on image
+
 #### 1. Provide an example of a distortion-corrected image.
 
 To demonstrate this step, I will describe how I apply the distortion correction with this image:
@@ -71,7 +78,7 @@ Undistorted:
 ![alt text][image5]
 
 In my preprocessing pipeline, I reduced the image to a triangle of interest.
-Code in line 218 through 250.
+Code in line 220 through 253.
 Definition of my triangle:
 
 ````sh
@@ -103,7 +110,7 @@ And with applied undistortion:
 
 After the region of interest cut-out, I did the perspective transform.
 
-The code for my perspective transform includes a function called `unwarp()`, which appears in lines 254 through 261   The `warper()` function takes as inputs an image (`img`). It also requires the global variables source (`src`) and destination (`dst`) points.  I chose the hardcode the source and destination points in the following manner within the `do_calibration()` method in lines 97 to 106:
+The code for my perspective transform includes a function called `unwarp()`, which appears in lines 254 through 261   The `warper()` function takes as inputs an image (`img`). It also requires the global variables source (`src`) and destination (`dst`) points.  I chose the hardcode the source and destination points in the following manner within the `do_calibration()` method in lines 88 to 109:
 
 ```sh
     src_points = np.float32([(540, 488),
@@ -132,7 +139,7 @@ Here is the result:
 
 #### 3. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
 
-I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines 111 through 215).  I first took out the yellow and white colors with `color_threshold` and then applied the Sobel, Magnitude and Direction of the Gradient thresholds. See why I used color threshold on white and yellow in the Discussions section.
+I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines 112 through 217).  I first took out the yellow and white colors with `color_threshold` and then applied the Sobel, Magnitude and Direction of the Gradient thresholds. See why I used color threshold on white and yellow in the Discussions section.
 
 Combined Thresholds only:
 ![alt text][image10]
@@ -143,21 +150,23 @@ Applied color threshold, too:
 
 #### 4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
 
-Then I did some other stuff and fit my lane lines with a 2nd order polynomial kinda like this:
-
+With the methods `find_lane_pixels()` and `search_around_poly()` in lines 308 to 421, I identify the lanes on the images, based on whether on the previous image both lanes were found or not.
+Then I search on the histogram of the bottom-half-image for the highest peaks on the left and right side, to find a starting point for the lanes on the bottom of the image. I used the sliding window method from the class, with 10 small but high winows, as you can see here: 
 ![alt text][image11]
 
 #### 5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.
 
-I did this in lines 413 through 451 in my code in `measure_curvature_and_center_distance()`
+I did this in lines 424 through 463 in my code in `measure_curvature_and_center_distance()` First I figured out the lane size in pixels from my image after prespective transformation. I decided for the whole image height and a width of 100 pixels for the size of the lane on my image. I assumed, that this equals the offical lane size of 30 to 3.7 meters, so that I found my y-/x-meters per pixel.
+
+To calculate the distance from the center of the lane, I simply assumed that the camera is in the center (width/2)of image.
 
 #### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
 
-I implemented this step in lines # through # in my code in `yet_another_file.py` in the function `map_lane()`.  Here is an example of my result:
+I implemented this step in lines 465 through 497 in my code in the function `draw_lane()`.  Here is an example of my result:
 
 ![alt text][image12]
 
-Annotated lane with information about curve radius and distance from center of the lane:
+I also added the information about curve radius and distance from center of the lane to the image by using the function `draw_data()` in lines 499 to 518. See the output:
 ![alt text][image13]
 
 ---

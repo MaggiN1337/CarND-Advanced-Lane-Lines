@@ -12,8 +12,8 @@ INPUT_VIDEO = "project_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
 
 # debug controls
-TEST_RUN = True
-VISUALIZATION = True
+TEST_RUN = False
+VISUALIZATION = False
 VIDEO_LENGTH_SUB = (10, 11)
 
 # preprocessing techniques
@@ -85,6 +85,7 @@ def calibrate_camera(folder, img, obj_p, img_p):
     return mtx, dist
 
 
+# camera calibration pipeline
 def do_calibration():
     obj_points, img_points = get_camera_cali_params()
     camera_mtx, camera_dist = calibrate_camera(FOLDER_CAMERA_CAL, CALIBRATION__JPG, obj_points, img_points)
@@ -108,6 +109,7 @@ def do_calibration():
     return camera_mtx, camera_dist, src_points, dst_points
 
 
+# filter yellow and white color
 def color_threshold(image):
     """
     Removes pixels that are not within the color ranges
@@ -135,6 +137,7 @@ def color_threshold(image):
     return image
 
 
+# Apply Sobel, Magnitude & Direction of the Gradient
 def combined_thresholds(image):
     """
     Using the Sobel filter, find the edge pixels for the lane lines
@@ -214,7 +217,7 @@ def combined_thresholds(image):
     return combined
 
 
-# Udacity_project_1
+# filter on region of interest - from Udacity_project_1
 def region_of_interest(img):
     """
     Applies an image mask.
@@ -250,7 +253,7 @@ def region_of_interest(img):
     return masked_image
 
 
-# from Udacity
+# simple perspective transformation
 def unwarp(img):
     h, w = img.shape[:2]
     # use cv2.getPerspectiveTransform() to get M, the transform matrix, and Minv, the inverse
@@ -261,33 +264,40 @@ def unwarp(img):
     return warped, M, Minv
 
 
+# image preprocessing pipeline
 def preprocess_pipeline(img):
+    # load image and convert to RGB
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     if VISUALIZATION:
         save_image_as_png(img, "10_", "original_image")
         save_image_as_png(cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx), "11_", "undistorted_original_image")
 
+    # Apply region of interest filter on image, if enabled
     if REGION_OF_INTEREST:
         img = region_of_interest(img)
         if VISUALIZATION:
             save_image_as_png(img, "3_", "image_region_of_interest")
 
+    # Apply a distortion correction to raw images.
     img = cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx)
     if VISUALIZATION:
         save_image_as_png(img, "4_", "undistorted")
 
+    # Apply a perspective transform to rectify binary image ("birds-eye view").
     img, M, Minv = unwarp(img)
     if VISUALIZATION:
         save_image_as_png(img, "5_", "warped")
         save_image_as_png(combined_thresholds(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)), "6_",
                           "combined_without_color_threshold")
 
+    # filter yellow and white color from image, if enabled
     if COLOR_THRESHOLD:
         img = color_threshold(img)
     else:
         # Convert to grayscale
         img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
+    # Apply color thresholds on image
     img = combined_thresholds(img)
     if VISUALIZATION:
         save_image_as_png(img, "6_", "combined_thresholds")
@@ -295,6 +305,7 @@ def preprocess_pipeline(img):
     return img, Minv
 
 
+# Detect lane pixels and fit to find the lane boundary.
 def find_lane_pixels(binary_warped):
     # Take a histogram of the bottom half of the image
     half = int(binary_warped.shape[0] / 2)
@@ -410,6 +421,7 @@ def search_around_poly(binary_warped, left_fit, right_fit):
     return left_fit_new, right_fit_new, left_lane_inds, right_lane_inds, leftx, rightx, lefty, righty
 
 
+# Determine the curvature of the lane and vehicle position with respect to center.
 def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, leftx, rightx, lefty, righty):
     # Calculates the curvature of polynomial functions in pixels.
 
@@ -450,7 +462,7 @@ def measure_curvature_and_center_distance(bin_img, l_fit, r_fit, leftx, rightx, 
     return radius, distance_from_center
 
 
-# from Udacity project lines on original image
+# Warp the detected lane boundaries back onto the original image.
 def draw_lane(original_img, warped_img, l_fit, r_fit, Minv):
     # new_img = np.copy(original_img)
 
@@ -484,6 +496,7 @@ def draw_lane(original_img, warped_img, l_fit, r_fit, Minv):
     return result
 
 
+# Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
 def draw_data(original_img, curv_rad, center_dist):
     new_img = np.copy(original_img)
 
@@ -588,6 +601,7 @@ class Line():
             # self.best_fit = np.average(self.current_fit, axis=0)
 
 
+# import video, process images, write image
 def write_video():
     video_output = FOLDER_OUTPUT + "lane_detected_" + INPUT_VIDEO
 
@@ -601,15 +615,7 @@ def write_video():
     output_clip.write_videofile(video_output, audio=False)
 
 
-# TODO: import video as array of images
-# TODO: Apply a distortion correction to raw images.
-# TODO: Use color transforms, gradients, etc., to create a thresholded binary image.
-# TODO: Apply a perspective transform to rectify binary image ("birds-eye view").
-# TODO: Detect lane pixels and fit to find the lane boundary.
-# TODO: Determine the curvature of the lane and vehicle position with respect to center.
-# TODO: Warp the detected lane boundaries back onto the original image.
-# TODO: Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
-
+# Start lane line recognition with camera calibration
 cali_mtx, cali_dist, src, dst = do_calibration()
 l_line = Line()
 r_line = Line()
