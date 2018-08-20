@@ -12,8 +12,8 @@ INPUT_VIDEO = "project_video.mp4"
 # INPUT_VIDEO = "harder_challenge_video.mp4"
 
 # debug controls
-TEST_RUN = False
-VISUALIZATION = False
+TEST_RUN = True
+VISUALIZATION = True
 VIDEO_LENGTH_SUB = (10, 11)
 
 # preprocessing techniques
@@ -263,6 +263,9 @@ def unwarp(img):
 
 def preprocess_pipeline(img):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    if VISUALIZATION:
+        save_image_as_png(img, "10_", "original_image")
+        save_image_as_png(cv2.undistort(img, cali_mtx, cali_dist, None, cali_mtx), "11_", "undistorted_original_image")
 
     if REGION_OF_INTEREST:
         img = region_of_interest(img)
